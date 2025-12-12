@@ -1,0 +1,72 @@
+# Gun Registry Adapter - Docker Compose Configuration
+# Runs adapter service + n8n workflow automation
+
+services:
+  # =========================================================================
+  # Gun Registry Adapter Service
+  # =========================================================================
+  adapter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gun_registry_adapter
+    ports:
+      - "${API_PORT:-8000}:8000"
+    env_file:
+      - .env
+    volumes:
+      # Mount data directory (read-only for safety)
+      - ./data:/app/data:ro
+      # Mount logs directory (read-write)
+      - ./logs:/app/logs
+      # Mount config for hot-reload in development
+      - ./adapter:/app/adapter:ro
+    depends_on:
+      - n8n
+    networks:
+      - gun_registry_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # =========================================================================
+  # n8n Workflow Automation
+  # =========================================================================
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n_workflow
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-changeme}
+      - N8N_HOST=${N8N_HOST:-0.0.0.0}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://adapter:8000
+    volumes:
+      # Persist n8n data
+      - n8n_data:/home/node/.n8n
+      # Mount workflow JSON for import
+      - ./workflow:/workflow:ro
+    networks:
+      - gun_registry_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  gun_registry_net:
+    driver: bridge
+
+volumes:
+  n8n_data:
+    driver: local

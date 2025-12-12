@@ -1,0 +1,1545 @@
+{
+  "name": "Gun Registry Adapter – Eligibility & Registry Orchestration",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gun-registry/eligibility-check",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "382b02be-5c2e-46da-a7c3-dfd46aeb69da",
+      "name": "Webhook – Eligibility Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        -2480,
+        336
+      ],
+      "webhookId": "gun-registry-eligibility"
+    },
+    {
+      "parameters": {},
+      "id": "dc4b3932-cf47-4d83-97c7-0e27fae26796",
+      "name": "Manual – Test Payload",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2704,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Test payload for manual execution\nreturn [\n  {\n    json: {\n      \"request_id\": \"test-\" + Date.now(),\n      \"applicant_raw\": {\n        \"full_name\": \"John Smith\",\n        \"dob\": \"1992-05-15\",\n        \"id_image_url\": \"https://example.com/id-image.jpg\",\n        \"id_number\": \"D1234567\",\n        \"address\": \"123 Main St, Austin, TX 78701\",\n        \"state\": \"TX\"\n      },\n      \"application_raw\": {\n        \"firearm_type\": \"HANDGUN\",\n        \"dealer_id\": \"DEALER-TX-001\",\n        \"state_of_purchase\": \"TX\",\n        \"channel\": \"IN_STORE\",\n        \"timestamp\": new Date().toISOString()\n      },\n      \"notify\": {\n        \"applicant_email\": \"john.smith@example.com\",\n        \"dealer_email\": \"dealer@example.com\"\n      }\n    }\n  }\n];"
+      },
+      "id": "9dd5aa52-92f3-4bac-9562-f0307c1f41a9",
+      "name": "Code – Generate Test Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2480,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ctx-request-id",
+              "name": "request_id",
+              "value": "={{ $json.request_id || 'req-' + $now.toUnixInteger() }}",
+              "type": "string"
+            },
+            {
+              "id": "ctx-trace-id",
+              "name": "trace_id",
+              "value": "={{ 'trace-' + $now.toUnixInteger() + '-' + Math.random().toString(36).substr(2, 9) }}",
+              "type": "string"
+            },
+            {
+              "id": "ctx-received-at",
+              "name": "received_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "ctx-stage",
+              "name": "stage",
+              "value": "INGESTION",
+              "type": "string"
+            },
+            {
+              "id": "ctx-applicant",
+              "name": "applicant_raw",
+              "value": "={{ $json.applicant_raw }}",
+              "type": "object"
+            },
+            {
+              "id": "ctx-application",
+              "name": "application_raw",
+              "value": "={{ $json.application_raw }}",
+              "type": "object"
+            },
+            {
+              "id": "ctx-notify",
+              "name": "notify",
+              "value": "={{ $json.notify }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dd8b1338-a324-427d-80f0-dfe137d4d67b",
+      "name": "Set – Initialize Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        -2256,
+        240
+      ],
+      "notes": "Initialize workflow context with request metadata and stage tracking"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate required fields\nconst item = $input.item.json;\nconst errors = [];\n// Check request_id\nif (!item.request_id) {\n  errors.push('Missing required field: request_id');\n}\n// Check applicant_raw\nif (!item.applicant_raw) {\n  errors.push('Missing required field: applicant_raw');\n} else {\n  if (!item.applicant_raw.id_image_url) {\n    errors.push('Missing required field: applicant_raw.id_image_url');\n  }\n  if (!item.applicant_raw.dob) {\n    errors.push('Missing required field: applicant_raw.dob');\n  }\n}\n// Check application_raw\nif (!item.application_raw) {\n  errors.push('Missing required field: application_raw');\n} else {\n  if (!item.application_raw.state_of_purchase) {\n    errors.push('Missing required field: application_raw.state_of_purchase');\n  }\n  if (!item.application_raw.firearm_type) {\n    errors.push('Missing required field: application_raw.firearm_type');\n  }\n}\nif (errors.length > 0) {\n  return {\n    json: {\n      ...item,\n      validation_failed: true,\n      validation_errors: errors,\n      error_type: 'VALIDATION_ERROR',\n      stage: 'INGESTION'\n    }\n  };\n}\nreturn {\n  json: {\n    ...item,\n    validation_passed: true,\n    stage_started_at: new Date().toISOString()\n  }\n};"
+      },
+      "id": "2d1d6f7a-0390-44aa-8a7a-2c1bd3df9ac7",
+      "name": "Function – Validate Basic Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2032,
+        240
+      ],
+      "notes": "Validate required fields in the request payload"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "validation-check",
+              "leftValue": "={{ $json.validation_passed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b3f97c17-1b2d-48d7-9221-403aa633ae43",
+      "name": "IF – Validation Failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1808,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MODEL_A_OCR_URL }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "request_id",
+              "value": "={{ $json.request_id }}"
+            },
+            {
+              "name": "id_image_url",
+              "value": "={{ $json.applicant_raw.id_image_url }}"
+            },
+            {
+              "name": "metadata",
+              "value": "={{ { \"source\": \"n8n\", \"submitted_at\": $json.received_at, \"trace_id\": $json.trace_id } }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "9251265b-0f75-4c04-936e-c1a65335bbc0",
+      "name": "HTTP – Call Model A (OCR)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1584,
+        48
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "Extract ID information using OCR perception model"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error-stage",
+              "name": "error_context",
+              "value": "={{ {\n  \"request_id\": $json.request_id,\n  \"stage\": \"MODEL_A\",\n  \"error_type\": \"HTTP_ERROR\",\n  \"error_details\": $json.error || 'Model A OCR call failed',\n  \"last_input\": {\n    \"id_image_url\": $('HTTP – Call Model A (OCR)').item.json.applicant_raw?.id_image_url,\n    \"request_id\": $('HTTP – Call Model A (OCR)').item.json.request_id\n  },\n  \"last_output\": null\n} }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5b12367f-828f-4fe8-8d21-e787a22dd043",
+      "name": "Set – Model A Error Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        656,
+        -288
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ocr-data",
+              "name": "extracted_fields",
+              "value": "={{ $json.extracted_fields }}",
+              "type": "object"
+            },
+            {
+              "id": "image-quality",
+              "name": "image_quality",
+              "value": "={{ $json.image_quality }}",
+              "type": "object"
+            },
+            {
+              "id": "tamper-detect",
+              "name": "tamper_detection",
+              "value": "={{ $json.tamper_detection }}",
+              "type": "object"
+            },
+            {
+              "id": "stage-update",
+              "name": "stage",
+              "value": "NORMALIZATION",
+              "type": "string"
+            },
+            {
+              "id": "model-a-finished",
+              "name": "model_a_finished_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "a3f48996-787d-41da-8aac-9f235303ec82",
+      "name": "Set – Attach Model A Results",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        -1360,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ADAPTER_NORMALIZE_URL }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "request_id",
+              "value": "={{ $json.request_id }}"
+            },
+            {
+              "name": "applicant_raw",
+              "value": "={{ $json.applicant_raw }}"
+            },
+            {
+              "name": "application_raw",
+              "value": "={{ $json.application_raw }}"
+            },
+            {
+              "name": "extracted_fields",
+              "value": "={{ $json.extracted_fields }}"
+            },
+            {
+              "name": "trace_id",
+              "value": "={{ $json.trace_id }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "c81cfd04-1c18-4405-bd5d-2de00ab9f2f2",
+      "name": "HTTP – Normalize Applicant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1136,
+        144
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "Normalize applicant data into canonical schema"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error-normalize",
+              "name": "error_context",
+              "value": "={{ {\n  \"request_id\": $json.request_id,\n  \"stage\": \"NORMALIZATION\",\n  \"error_type\": \"HTTP_ERROR\",\n  \"error_details\": $json.error || 'Normalization call failed',\n  \"last_input\": {\n    \"extracted_fields\": $('HTTP – Normalize Applicant').item.json.extracted_fields\n  },\n  \"last_output\": null\n} }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cb6a3f33-6c7a-4a62-b2a1-b09fd52062f7",
+      "name": "Set – Normalize Error Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        656,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "normalized-applicant",
+              "name": "normalized_applicant",
+              "value": "={{ $json.applicant }}",
+              "type": "object"
+            },
+            {
+              "id": "normalized-application",
+              "name": "normalized_application",
+              "value": "={{ $json.application }}",
+              "type": "object"
+            },
+            {
+              "id": "quality-flags",
+              "name": "quality_flags",
+              "value": "={{ $json.quality_flags }}",
+              "type": "object"
+            },
+            {
+              "id": "stage-model-b",
+              "name": "stage",
+              "value": "MODEL_B",
+              "type": "string"
+            },
+            {
+              "id": "normalize-finished",
+              "name": "normalize_finished_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "c577e0a3-ab8d-4f8d-bcae-edc5b8f3e616",
+      "name": "Set – Attach Normalized Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        -912,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MODEL_B_RISK_URL }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "request_id",
+              "value": "={{ $json.request_id }}"
+            },
+            {
+              "name": "normalized_applicant",
+              "value": "={{ $json.normalized_applicant }}"
+            },
+            {
+              "name": "normalized_application",
+              "value": "={{ $json.normalized_application }}"
+            },
+            {
+              "name": "trace_id",
+              "value": "={{ $json.trace_id }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 25000
+        }
+      },
+      "id": "1b936951-f64a-4ff3-b16c-6fe6657d9ce9",
+      "name": "HTTP – Call Model B (Risk Assessment)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -688,
+        240
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "Perform risk scoring and reasoning on normalized applicant"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error-model-b",
+              "name": "error_context",
+              "value": "={{ {\n  \"request_id\": $json.request_id,\n  \"stage\": \"MODEL_B\",\n  \"error_type\": \"HTTP_ERROR\",\n  \"error_details\": $json.error || 'Model B risk assessment failed',\n  \"last_input\": {\n    \"normalized_applicant\": $('HTTP – Call Model B (Risk Assessment)').item.json.normalized_applicant\n  },\n  \"last_output\": null\n} }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "24fee604-823f-4c0f-900b-4336d78de51a",
+      "name": "Set – Model B Error Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        656,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "risk-assessment",
+              "name": "risk_assessment",
+              "value": "={{ $json }}",
+              "type": "object"
+            },
+            {
+              "id": "stage-eligibility",
+              "name": "stage",
+              "value": "ELIGIBILITY",
+              "type": "string"
+            },
+            {
+              "id": "model-b-finished",
+              "name": "model_b_finished_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "db0a5fc7-2090-44bb-bb7d-6ed188cb5f3d",
+      "name": "Set – Attach Risk Assessment",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        -464,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ELIGIBILITY_ENGINE_URL }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "request_id",
+              "value": "={{ $json.request_id }}"
+            },
+            {
+              "name": "normalized_applicant",
+              "value": "={{ $json.normalized_applicant }}"
+            },
+            {
+              "name": "risk_assessment",
+              "value": "={{ $json.risk_assessment }}"
+            },
+            {
+              "name": "trace_id",
+              "value": "={{ $json.trace_id }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "f7e0a615-c5a9-41dc-9cd5-d1cc3bc89aa2",
+      "name": "HTTP – Call Eligibility Engine",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        336
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "Evaluate eligibility based on business rules and risk assessment"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error-eligibility",
+              "name": "error_context",
+              "value": "={{ {\n  \"request_id\": $json.request_id,\n  \"stage\": \"ELIGIBILITY\",\n  \"error_type\": \"HTTP_ERROR\",\n  \"error_details\": $json.error || 'Eligibility engine call failed',\n  \"last_input\": {\n    \"normalized_applicant\": $('HTTP – Call Eligibility Engine').item.json.normalized_applicant,\n    \"risk_assessment\": $('HTTP – Call Eligibility Engine').item.json.risk_assessment\n  },\n  \"last_output\": null\n} }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1af0748-60dc-415a-ab87-ecadb54ca0b9",
+      "name": "Set – Eligibility Error Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        656,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "eligibility-decision",
+              "name": "eligibility_decision",
+              "value": "={{ $json }}",
+              "type": "object"
+            },
+            {
+              "id": "stage-registry",
+              "name": "stage",
+              "value": "REGISTRY",
+              "type": "string"
+            },
+            {
+              "id": "eligibility-finished",
+              "name": "eligibility_finished_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "3cc0f78d-41f0-4f6f-a018-5d9a50acb7b0",
+      "name": "Set – Attach Eligibility Decision",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        -16,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.eligibility_decision.decision }}",
+                    "rightValue": "APPROVE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "APPROVE"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.eligibility_decision.decision }}",
+                    "rightValue": "REVIEW",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "REVIEW"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.eligibility_decision.decision }}",
+                    "rightValue": "DENY",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "DENY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7c50a00f-d21f-4e5e-b9d1-042bf026abac",
+      "name": "Switch – Decision Branch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        208,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.REGISTRY_SUBMIT_URL }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "request_id",
+              "value": "={{ $json.request_id }}"
+            },
+            {
+              "name": "normalized_applicant",
+              "value": "={{ $json.normalized_applicant }}"
+            },
+            {
+              "name": "eligibility_decision",
+              "value": "={{ $json.eligibility_decision }}"
+            },
+            {
+              "name": "risk_assessment",
+              "value": "={{ $json.risk_assessment }}"
+            },
+            {
+              "name": "trace_id",
+              "value": "={{ $json.trace_id }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "316f33bc-5888-405c-baf1-4c62450e5052",
+      "name": "HTTP – Submit to Registry (APPROVE)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        432,
+        480
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "Submit approved application to gun registry"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.REGISTRY_SUBMIT_URL }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "request_id",
+              "value": "={{ $json.request_id }}"
+            },
+            {
+              "name": "normalized_applicant",
+              "value": "={{ $json.normalized_applicant }}"
+            },
+            {
+              "name": "eligibility_decision",
+              "value": "={{ $json.eligibility_decision }}"
+            },
+            {
+              "name": "risk_assessment",
+              "value": "={{ $json.risk_assessment }}"
+            },
+            {
+              "name": "trace_id",
+              "value": "={{ $json.trace_id }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "9b1e3233-bf61-404a-8681-87b3b1600c03",
+      "name": "HTTP – Submit to Registry (REVIEW)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        432,
+        768
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "Submit review-required application to gun registry"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error-registry",
+              "name": "error_context",
+              "value": "={{ {\n  \"request_id\": $json.request_id,\n  \"stage\": \"REGISTRY\",\n  \"error_type\": \"HTTP_ERROR\",\n  \"error_details\": $json.error || 'Registry submission failed',\n  \"last_input\": {\n    \"eligibility_decision\": $json.eligibility_decision\n  },\n  \"last_output\": null\n} }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "41b34ff6-0a47-4b74-8372-6723ca518751",
+      "name": "Set – Registry Error Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        656,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "registry-response",
+              "name": "registry_submission",
+              "value": "={{ $json }}",
+              "type": "object"
+            },
+            {
+              "id": "registry-finished",
+              "name": "registry_finished_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "0271957f-df55-4fee-b060-39b1608e9852",
+      "name": "Set – Attach Registry Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        656,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "deny-skip-registry",
+              "name": "registry_submission",
+              "value": "={{ { \"status\": \"DENIED_NO_SUBMISSION\", \"message\": \"Application denied, no registry submission\" } }}",
+              "type": "object"
+            },
+            {
+              "id": "deny-timestamp",
+              "name": "deny_processed_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "592ca7a4-f2ae-4117-8c88-415e7da7b87d",
+      "name": "Set – Skip Registry (DENY)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        656,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compose decision summary for notifications\nconst item = $input.item.json;\n\nconst decision = item.eligibility_decision?.decision || 'UNKNOWN';\nconst requestId = item.request_id || 'N/A';\nconst riskScore = item.risk_assessment?.risk_score || 0;\nconst riskLevel = item.risk_assessment?.risk_level || 'UNKNOWN';\nconst registryId = item.registry_submission?.registry_id || null;\n\nconst summary = {\n  request_id: requestId,\n  trace_id: item.trace_id,\n  decision: decision,\n  decision_reasons: item.eligibility_decision?.decision_reasons || [],\n  risk_score: riskScore,\n  risk_level: riskLevel,\n  risk_explanation: item.risk_assessment?.risk_explanation || [],\n  rule_hits: item.risk_assessment?.rule_hits || [],\n  registry_id: registryId,\n  registry_status: item.registry_submission?.status || 'N/A',\n  applicant_name: item.normalized_applicant?.full_name || item.applicant_raw?.full_name || 'Unknown',\n  applicant_age: item.normalized_applicant?.age_years || 'Unknown',\n  state_of_purchase: item.normalized_application?.state_of_purchase || item.application_raw?.state_of_purchase || 'Unknown',\n  firearm_type: item.normalized_application?.firearm_type || item.application_raw?.firearm_type || 'Unknown',\n  quality_flags: item.quality_flags || {},\n  processing_time_ms: item.received_at && item.eligibility_finished_at ? \n    (new Date(item.eligibility_finished_at) - new Date(item.received_at)) : null,\n  timestamp: new Date().toISOString()\n};\n\nconst emailSubject = `[Gun Registry] ${decision} – Request ${requestId}`;\n\nconst emailBody = `\n<h2>Gun Registry Eligibility Decision</h2>\n<p><strong>Decision:</strong> ${decision}</p>\n<p><strong>Request ID:</strong> ${requestId}</p>\n<p><strong>Trace ID:</strong> ${item.trace_id}</p>\n<hr>\n\n<h3>Applicant Information</h3>\n<ul>\n  <li><strong>Name:</strong> ${summary.applicant_name}</li>\n  <li><strong>Age:</strong> ${summary.applicant_age}</li>\n  <li><strong>State of Purchase:</strong> ${summary.state_of_purchase}</li>\n  <li><strong>Firearm Type:</strong> ${summary.firearm_type}</li>\n</ul>\n\n<h3>Risk Assessment</h3>\n<ul>\n  <li><strong>Risk Score:</strong> ${riskScore.toFixed(2)}</li>\n  <li><strong>Risk Level:</strong> ${riskLevel}</li>\n  <li><strong>Rule Hits:</strong> ${summary.rule_hits.join(', ') || 'None'}</li>\n</ul>\n<p><strong>Risk Explanation:</strong></p>\n<ul>\n  ${summary.risk_explanation.map(r => `<li>${r}</li>`).join('')}\n</ul>\n\n<h3>Decision Reasons</h3>\n<ul>\n  ${summary.decision_reasons.map(r => `<li>${r}</li>`).join('')}\n</ul>\n\n<h3>Registry Submission</h3>\n<ul>\n  <li><strong>Registry ID:</strong> ${registryId || 'N/A'}</li>\n  <li><strong>Status:</strong> ${summary.registry_status}</li>\n</ul>\n\n<h3>Quality Flags</h3>\n<pre>${JSON.stringify(summary.quality_flags, null, 2)}</pre>\n\n<h3>Processing Time</h3>\n<p>${summary.processing_time_ms ? (summary.processing_time_ms / 1000).toFixed(2) + ' seconds' : 'N/A'}</p>\n\n<hr>\n<p><em>Full context available in n8n execution logs</em></p>\n`;\n\nreturn {\n  json: {\n    ...item,\n    decision_summary: summary,\n    email_subject: emailSubject,\n    email_body: emailBody\n  }\n};"
+      },
+      "id": "fe94fdc7-995f-4697-aa84-f68c1191c1a6",
+      "name": "Compose – Decision Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        816
+      ],
+      "notes": "Build human-readable summary for notifications"
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@gunregistry.example.com",
+        "toEmail": "={{ $env.INTERNAL_GUN_REG_EMAIL }}",
+        "subject": "={{ $json.email_subject }}",
+        "html": "={{ $json.email_body }}",
+        "options": {}
+      },
+      "id": "5f3f2222-5461-4a5a-a383-9eb1f9c0a460",
+      "name": "Email – Notify Internal",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1104,
+        672
+      ],
+      "webhookId": "586497a4-2f4b-46cb-8423-3489a5623abe",
+      "notes": "Send decision notification to internal staff"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "notify-applicant-check",
+              "leftValue": "={{ $json.notify?.applicant_email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "bc9e6992-61d4-4f1d-8573-baba79405ac7",
+      "name": "IF – Should Notify Applicant?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        912
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@gunregistry.example.com",
+        "toEmail": "={{ $json.notify.applicant_email }}",
+        "subject": "={{ 'Gun Registry Application Update – ' + $json.eligibility_decision.decision }}",
+        "options": {}
+      },
+      "id": "abc49e77-78f2-44bf-90f8-afe31077e7de",
+      "name": "Email – Notify Applicant",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1328,
+        912
+      ],
+      "webhookId": "34880718-ec8b-4b94-a4fe-e9d97ff02436",
+      "notes": "Send simplified notification to applicant (optional)"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"request_id\": $json.request_id,\n  \"decision\": $json.eligibility_decision?.decision || 'ERROR',\n  \"risk_level\": $json.risk_assessment?.risk_level || 'UNKNOWN',\n  \"risk_score\": $json.risk_assessment?.risk_score || 0,\n  \"registry_id\": $json.registry_submission?.registry_id || null,\n  \"explanations\": {\n    \"decision_reasons\": $json.eligibility_decision?.decision_reasons || [],\n    \"risk_explanation\": $json.risk_assessment?.risk_explanation || [],\n    \"quality_flags\": $json.quality_flags || {}\n  },\n  \"status\": \"SUCCESS\",\n  \"timestamp\": $now.toISO()\n} }}",
+        "options": {}
+      },
+      "id": "ffdf7709-3877-4329-967f-6723e68a599a",
+      "name": "Respond – Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1328,
+        672
+      ],
+      "notes": "Return successful response to webhook caller"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MODEL_C_SELF_HEAL_URL }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "request_id",
+              "value": "={{ $json.error_context?.request_id || $json.request_id }}"
+            },
+            {
+              "name": "stage",
+              "value": "={{ $json.error_context?.stage || $json.stage }}"
+            },
+            {
+              "name": "error_type",
+              "value": "={{ $json.error_context?.error_type || $json.error_type }}"
+            },
+            {
+              "name": "error_details",
+              "value": "={{ $json.error_context?.error_details || $json.validation_errors?.join(', ') || 'Unknown error' }}"
+            },
+            {
+              "name": "last_input",
+              "value": "={{ $json.error_context?.last_input || {} }}"
+            },
+            {
+              "name": "last_output",
+              "value": "={{ $json.error_context?.last_output || {} }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "9fbf9030-d9a6-47fd-a00b-5bd0a3ea0be0",
+      "name": "HTTP – Self-Healing Advisor (Model C)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        192
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "Call Model C for error analysis and suggestions"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "self-heal-result",
+              "name": "self_healing",
+              "value": "={{ $json }}",
+              "type": "object"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "66c05b15-3605-42cc-8aab-b0fe548d7a88",
+      "name": "Set – Attach Self-Heal Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        1104,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build error notification email\nconst item = $input.item.json;\n\nconst errorStage = item.error_context?.stage || item.stage || 'UNKNOWN';\nconst errorType = item.error_context?.error_type || item.error_type || 'UNKNOWN';\nconst errorDetails = item.error_context?.error_details || item.validation_errors?.join(', ') || 'Unknown error';\nconst requestId = item.request_id || 'N/A';\n\nconst selfHealing = item.self_healing || {};\n\nconst emailSubject = `[Gun Registry ERROR] ${errorStage} – ${requestId}`;\n\nconst emailBody = `\n<h2 style=\"color: red;\">Gun Registry Workflow Error</h2>\n<p><strong>Request ID:</strong> ${requestId}</p>\n<p><strong>Trace ID:</strong> ${item.trace_id || 'N/A'}</p>\n<p><strong>Stage:</strong> ${errorStage}</p>\n<p><strong>Error Type:</strong> ${errorType}</p>\n<hr>\n\n<h3>Error Details</h3>\n<pre>${errorDetails}</pre>\n\n<h3>Self-Healing Analysis (Model C)</h3>\n<ul>\n  <li><strong>Classification:</strong> ${selfHealing.classification || 'N/A'}</li>\n  <li><strong>Suggested Human Action:</strong> ${selfHealing.suggested_human_action || 'N/A'}</li>\n  <li><strong>Suggested Code Change:</strong> ${selfHealing.suggested_code_change_summary || 'N/A'}</li>\n  <li><strong>Test Case Suggestion:</strong> ${selfHealing.test_case_suggestion || 'N/A'}</li>\n</ul>\n\n<h3>Last Input</h3>\n<pre>${JSON.stringify(item.error_context?.last_input || {}, null, 2)}</pre>\n\n<h3>Last Output</h3>\n<pre>${JSON.stringify(item.error_context?.last_output || {}, null, 2)}</pre>\n\n<hr>\n<p><em>Check n8n execution logs for full context</em></p>\n`;\n\nreturn {\n  json: {\n    ...item,\n    error_email_subject: emailSubject,\n    error_email_body: emailBody\n  }\n};"
+      },
+      "id": "afa61a01-3efa-479d-8433-1fe213a6d29d",
+      "name": "Compose – Error Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        192
+      ],
+      "notes": "Build error notification email with self-healing analysis"
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@gunregistry.example.com",
+        "toEmail": "={{ $env.INTERNAL_GUN_REG_EMAIL }}",
+        "subject": "={{ $json.error_email_subject }}",
+        "html": "={{ $json.error_email_body }}",
+        "options": {}
+      },
+      "id": "5a7df4d9-fc0a-4255-8027-74265554e178",
+      "name": "Email – Internal Error Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1552,
+        192
+      ],
+      "webhookId": "1518beae-43f5-4d36-b818-7f6f2b849c5c",
+      "notes": "Send error alert to internal team with Model C analysis"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"request_id\": $json.request_id || null,\n  \"status\": \"ERROR\",\n  \"stage\": $json.error_context?.stage || $json.stage || 'UNKNOWN',\n  \"error_type\": $json.error_context?.error_type || $json.error_type || 'UNKNOWN',\n  \"message\": $json.error_context?.error_details || $json.validation_errors?.join(', ') || 'An error occurred processing your request',\n  \"self_healing\": {\n    \"classification\": $json.self_healing?.classification || 'N/A',\n    \"suggested_human_action\": $json.self_healing?.suggested_human_action || 'N/A'\n  },\n  \"timestamp\": $now.toISO()\n} }}",
+        "options": {}
+      },
+      "id": "3022d050-5883-4a78-96aa-275e70db4649",
+      "name": "Respond – Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1776,
+        192
+      ],
+      "notes": "Return error response to webhook caller"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "validation-error-context",
+              "name": "error_context",
+              "value": "={{ {\n  \"request_id\": $json.request_id,\n  \"stage\": \"INGESTION\",\n  \"error_type\": \"VALIDATION_ERROR\",\n  \"error_details\": $json.validation_errors.join(', '),\n  \"last_input\": {\n    \"applicant_raw\": $json.applicant_raw,\n    \"application_raw\": $json.application_raw\n  },\n  \"last_output\": null\n} }}",
+              "type": "object"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "4d833e27-1b35-4db7-8cac-40b0561057fa",
+      "name": "Set – Validation Error Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        656,
+        1152
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "farahi.zubair121@gmail.com",
+        "subject": "Fireman Update",
+        "emailType": "text",
+        "message": "=Hello Zubair,\n\nsome update:\n\nError: {{ $json.error }}\n\nCheck: {{ $today }}\n\nbest,\nabc",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1328,
+        416
+      ],
+      "id": "3bef3a4c-8160-4af1-86af-5bef57cba1f6",
+      "name": "Send a message",
+      "webhookId": "8eb2a7d1-a994-472e-870d-62d276c0072d",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "3VG40LveBYLPiO7O",
+          "name": "Gmail account 2"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook – Eligibility Request": {
+      "main": [
+        [
+          {
+            "node": "Set – Initialize Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual – Test Payload": {
+      "main": [
+        [
+          {
+            "node": "Code – Generate Test Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code – Generate Test Payload": {
+      "main": [
+        [
+          {
+            "node": "Set – Initialize Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set – Initialize Context": {
+      "main": [
+        [
+          {
+            "node": "Function – Validate Basic Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function – Validate Basic Fields": {
+      "main": [
+        [
+          {
+            "node": "IF – Validation Failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF – Validation Failed?": {
+      "main": [
+        [
+          {
+            "node": "Set – Validation Error Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP – Call Model A (OCR)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP – Call Model A (OCR)": {
+      "main": [
+        [
+          {
+            "node": "Set – Attach Model A Results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set – Model A Error Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set – Model A Error Context": {
+      "main": [
+        [
+          {
+            "node": "HTTP – Self-Healing Advisor (Model C)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set – Attach Model A Results": {
+      "main": [
+        [
+          {
+            "node": "HTTP – Normalize Applicant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP – Normalize Applicant": {
+      "main": [
+        [
+          {
+            "node": "Set – Attach Normalized Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set – Normalize Error Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set – Normalize Error Context": {
+      "main": [
+        [
+          {
+            "node": "HTTP – Self-Healing Advisor (Model C)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set – Attach Normalized Data": {
+      "main": [
+        [
+          {
+            "node": "HTTP – Call Model B (Risk Assessment)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP – Call Model B (Risk Assessment)": {
+      "main": [
+        [
+          {
+            "node": "Set – Attach Risk Assessment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set – Model B Error Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set – Model B Error Context": {
+      "main": [
+        [
+          {
+            "node": "HTTP – Self-Healing Advisor (Model C)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set – Attach Risk Assessment": {
+      "main": [
+        [
+          {
+            "node": "HTTP – Call Eligibility Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP – Call Eligibility Engine": {
+      "main": [
+        [
+          {
+            "node": "Set – Attach Eligibility Decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set – Eligibility Error Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set – Eligibility Error Context": {
+      "main": [
+        [
+          {
+            "node": "HTTP – Self-Healing Advisor (Model C)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set – Attach Eligibility Decision": {
+      "main": [
+        [
+          {
+            "node": "Switch – Decision Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP – Submit to Registry (APPROVE)": {
+      "main": [
+        [
+          {
+            "node": "Set – Attach Registry Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set – Registry Error Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP – Submit to Registry (REVIEW)": {
+      "main": [
+        [
+          {
+            "node": "Set – Attach Registry Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set – Registry Error Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set – Registry Error Context": {
+      "main": [
+        [
+          {
+            "node": "HTTP – Self-Healing Advisor (Model C)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set – Attach Registry Response": {
+      "main": [
+        [
+          {
+            "node": "Compose – Decision Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set – Skip Registry (DENY)": {
+      "main": [
+        [
+          {
+            "node": "Compose – Decision Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose – Decision Summary": {
+      "main": [
+        [
+          {
+            "node": "Email – Notify Internal",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF – Should Notify Applicant?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email – Notify Internal": {
+      "main": [
+        [
+          {
+            "node": "Respond – Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF – Should Notify Applicant?": {
+      "main": [
+        [
+          {
+            "node": "Email – Notify Applicant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP – Self-Healing Advisor (Model C)": {
+      "main": [
+        [
+          {
+            "node": "Set – Attach Self-Heal Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set – Attach Self-Heal Result": {
+      "main": [
+        [
+          {
+            "node": "Compose – Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose – Error Notification": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email – Internal Error Alert": {
+      "main": [
+        [
+          {
+            "node": "Respond – Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set – Validation Error Context": {
+      "main": [
+        [
+          {
+            "node": "HTTP – Self-Healing Advisor (Model C)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch – Decision Branch": {
+      "main": [
+        [
+          {
+            "node": "HTTP – Submit to Registry (APPROVE)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP – Submit to Registry (REVIEW)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set – Skip Registry (DENY)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "02f33d14-3d69-464e-9a2a-f933da603b61",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "e6f9f70bf1b210ed315f822de11b2f092ecdff46a8efef4377a5c8a4409a19c8"
+  },
+  "id": "KuP9gKKiShepZXj5",
+  "tags": []
+}
